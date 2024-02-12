@@ -5,7 +5,7 @@
 #![no_main]
 
 use bsp::entry;
-use defmt::*;
+// use defmt::*;
 use defmt_rtt as _;
 use embedded_hal::{
     adc::OneShot,
@@ -43,7 +43,7 @@ use heapless::String;
 
 #[entry]
 fn main() -> ! {
-    info!("Program start");
+    // info!("Program start");
     let mut peripherals = pac::Peripherals::take().unwrap();
     let core = pac::CorePeripherals::take().unwrap();
     let mut watchdog = Watchdog::new(peripherals.WATCHDOG);
@@ -112,8 +112,10 @@ fn main() -> ! {
     let mut s4en = pins.gpio22.into_push_pull_output();
 
     let mut loop_count: u32 = 0;
-    let mut reading: u16 = 0;
-    let mut new_reading: u16 = 0;
+    let mut reading: u64 = 0;
+    let mut new_reading: u64 = 0;
+
+    let threshold = 2600;
 
     s1en.set_high().unwrap();
     s2en.set_high().unwrap();
@@ -121,6 +123,8 @@ fn main() -> ! {
     s4en.set_low().unwrap();
 
     loop {
+        loop_count = loop_count.saturating_add(1);
+
         let delay_us = 800;
 
         led_pin.toggle().unwrap();
@@ -133,16 +137,22 @@ fn main() -> ! {
 
         new_reading = adc.read(&mut hall_sensor_pin).unwrap();
 
-        if reading > new_reading {
-            let _ = serial.write(b"Down\r\n");
+        if new_reading >= threshold {
+            if reading < threshold {
+                let _ = serial.write(b"Threshold\r\n");
+
+                loop_count = 0;
+            }
         } else {
-            let _ = serial.write(b"Up\r\n");
+            if reading >= threshold {
+                let _ = serial.write(b"Unthreshold\r\n");
+            }
         }
 
         reading = new_reading;
 
-        // writeln!(&mut text, "ADC: {}", reading).unwrap();
-        // let _ = serial.write(text.as_bytes());
+        writeln!(&mut text, "ADC: {}", reading).unwrap();
+        let _ = serial.write(text.as_bytes());
         // let _ = serial.write(b"Argle");
 
         // let _ = serial.write(b"Loop\r\n");
