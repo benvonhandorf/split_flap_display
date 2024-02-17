@@ -5,6 +5,7 @@
 #![no_main]
 
 use bsp::entry;
+use defmt::info;
 // use defmt::*;
 use defmt_rtt as _;
 use embedded_hal::{
@@ -38,7 +39,7 @@ use usbd_picotool_reset::PicoToolReset;
 use usbd_serial::SerialPort;
 
 // Used to demonstrate writing formatted strings
-use core::fmt::Write;
+use core::fmt::{Error, Write};
 use heapless::String;
 
 #[entry]
@@ -74,21 +75,19 @@ fn main() -> ! {
         &mut peripherals.RESETS,
     ));
 
-    // Set up the USB PicoTool Class Device driver
-    // let mut picotool: PicoToolReset<_> = PicoToolReset::new(&usb_bus);
+    // // Set up the USB PicoTool Class Device driver
+    let mut picotool: PicoToolReset<_> = PicoToolReset::new(&usb_bus);
 
-    // Set up the USB Communications Class Device driver
+    // // Set up the USB Communications Class Device driver
     let mut serial = SerialPort::new(&usb_bus);
 
-    // Create a USB device with a fake VID and PID
+    // // Create a USB device with a fake VID and PID
     let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
         .manufacturer("Fake company")
         .product("Serial port")
         .serial_number("TEST")
         .device_class(2) // from: https://www.usb.org/defined-class-codes
         .build();
-
-    let mut text: String<64> = String::new();
 
     let pins = bsp::Pins::new(
         peripherals.IO_BANK0,
@@ -115,12 +114,17 @@ fn main() -> ! {
     let mut reading: u64 = 0;
     let mut new_reading: u64 = 0;
 
-    let threshold = 2600;
+    let unthreshold = 2100;
+    let threshold: u64 = 2200;
+    let mut triggered = false;
+    let mut debounce_counter: u32 = 0;
 
     s1en.set_high().unwrap();
     s2en.set_high().unwrap();
     s3en.set_high().unwrap();
     s4en.set_low().unwrap();
+
+    let mut text: String<64> = String::new();
 
     loop {
         loop_count = loop_count.saturating_add(1);
@@ -138,22 +142,49 @@ fn main() -> ! {
         new_reading = adc.read(&mut hall_sensor_pin).unwrap();
 
         if new_reading >= threshold {
-            if reading < threshold {
-                let _ = serial.write(b"Threshold\r\n");
+            if !triggered && debounce_counter == 0 {
+                triggered = true;
+                debounce_counter = 10;
+
+                info!("Threshold {} loop_count: {}", new_reading, loop_count);
+
+                text.clear();
+
+                let result = writeln!(&mut text, "{}", loop_count);
+
+                if result.is_err() {
+                    info!("writln failed");
+                }
+                let _ = serial.write(text.as_bytes());
 
                 loop_count = 0;
+
+                delay.delay_ms(1000);
+            } else if !triggered {
+                debounce_counter = debounce_counter.saturating_sub(1);
+            } else {
+                //Already triggered
             }
-        } else {
-            if reading >= threshold {
-                let _ = serial.write(b"Unthreshold\r\n");
+        } else if new_reading < unthreshold {
+            if triggered && debounce_counter == 0 {
+                triggered = false;
+                debounce_counter = 10;
+
+                info!("Unthreshold {}", new_reading);
+
+                // loop_count = 0;
+
+                // delay.delay_ms(1000);
+            } else if triggered {
+                debounce_counter = debounce_counter.saturating_sub(1);
+            } else {
+                //Already untriggered
             }
         }
 
         reading = new_reading;
 
-        writeln!(&mut text, "ADC: {}", reading).unwrap();
-        let _ = serial.write(text.as_bytes());
-        // let _ = serial.write(b"Argle");
+        // info!("ADC: {}", reading);
 
         // let _ = serial.write(b"Loop\r\n");
 
