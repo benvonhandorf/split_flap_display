@@ -39,10 +39,18 @@ use usbd_picotool_reset::PicoToolReset;
 use usbd_serial::SerialPort;
 
 // Used to demonstrate writing formatted strings
-use core::fmt::{Error, Write};
+use core::{
+    fmt::{Error, Write},
+    slice::Split,
+};
 use heapless::String;
 
-const TARGETS: [u32; 15] = [2, 22, 8, 0, 1, 12, 12, 20, 18, 1, 9, 12, 19, 0, 0];
+use heapless::Vec;
+use split_flap_device::split_flap_bit_state::{SensorCalibration, SplitFlapBitState};
+
+const TARGETS: [char; 15] = [
+    'B', 'V', 'H', ' ', 'A', 'L', 'L', 'T', 'R', 'A', 'I', 'L', 'S', ' ', ' ',
+];
 
 #[entry]
 fn main() -> ! {
@@ -107,24 +115,20 @@ fn main() -> ! {
 
     let mut step = pins.gpio18.into_push_pull_output();
 
-    let mut s1en = pins.gpio19.into_push_pull_output();
-    let mut s2en = pins.gpio20.into_push_pull_output();
-    let mut s3en = pins.gpio21.into_push_pull_output();
-    let mut s4en = pins.gpio22.into_push_pull_output();
+    let mut s0en = pins.gpio19.into_push_pull_output();
+    let mut s1en = pins.gpio20.into_push_pull_output();
+    let mut s2en = pins.gpio21.into_push_pull_output();
+    let mut s3en = pins.gpio22.into_push_pull_output();
 
-    let mut loop_count: u32 = 0;
-    let mut reading: u64 = 0;
     let mut new_reading: u64 = 0;
 
-    let unthreshold = 2100;
-    let threshold: u64 = 2200;
-    let mut triggered = false;
-    let mut debounce_counter: u32 = 0;
+    s0en.set_low().unwrap();
+    s1en.set_low().unwrap();
+    s2en.set_low().unwrap();
+    s3en.set_low().unwrap();
 
-    s1en.set_high().unwrap();
-    s2en.set_high().unwrap();
-    s3en.set_high().unwrap();
-    s4en.set_low().unwrap();
+    const STEP_DELAY_US: u32 = 900;
+    const STEP_DELAY_TARGET_MS: u32 = 1000;
 
     const STEPS_PER_FLAP: u32 = 58;
 
@@ -133,77 +137,39 @@ fn main() -> ! {
     let mut target_idx = 0;
     let mut target_flap = TARGETS[target_idx];
 
-    let mut target_steps = HOME_OFFSET + (target_flap * STEPS_PER_FLAP);
+    let sensor_calibration = SensorCalibration {
+        trigger_value: 2200,
+        untrigger_value: 2100,
+    };
 
-    let mut text: String<64> = String::new();
-    let mut IS_HOMED = false;
+    let mut BITS: [SplitFlapBitState; 4] = [
+        SplitFlapBitState::new(sensor_calibration, STEPS_PER_FLAP, HOME_OFFSET),
+        SplitFlapBitState::new(sensor_calibration, STEPS_PER_FLAP, HOME_OFFSET),
+        SplitFlapBitState::new(sensor_calibration, STEPS_PER_FLAP, HOME_OFFSET),
+        SplitFlapBitState::new(sensor_calibration, STEPS_PER_FLAP, HOME_OFFSET),
+    ];
 
     loop {
-        loop_count = loop_count.saturating_add(1);
-
-        let delay_us = 900;
-
-        led_pin.toggle().unwrap();
-
-        delay.delay_us(delay_us);
+        // delay.delay_us(delay_us);
         step.set_high().unwrap();
 
-        delay.delay_us(delay_us);
+        delay.delay_us(STEP_DELAY_US);
         step.set_low().unwrap();
 
         new_reading = adc.read(&mut hall_sensor_pin).unwrap();
 
-        if new_reading >= threshold {
-            if !triggered && debounce_counter == 0 {
-                triggered = true;
-                debounce_counter = 10;
-                IS_HOMED = true;
+        if BITS[0].process(new_reading as u32) {
+            s0en.set_high().unwrap();
+        } else {
+            s0en.set_low().unwrap();
 
-                info!("Threshold {} loop_count: {}", new_reading, loop_count);
+            //If we've stopped stepping, we can delay briefly and then advance to the next character
+            //to be displayed
 
-                text.clear();
-
-                let result = write!(&mut text, "{}\r\n", loop_count);
-
-                if result.is_err() {
-                    info!("writeln failed");
-                }
-                let _ = serial.write(text.as_bytes());
-
-                loop_count = 0;
-
-                // delay.delay_ms(500);
-            } else if !triggered {
-                debounce_counter = debounce_counter.saturating_sub(1);
-            } else {
-                //Already triggered
-            }
-        } else if new_reading < unthreshold {
-            if triggered && debounce_counter == 0 {
-                triggered = false;
-                debounce_counter = 10;
-
-                info!("Unthreshold {}", new_reading);
-
-                // loop_count = 0;
-
-                // delay.delay_ms(1000);
-            } else if triggered {
-                debounce_counter = debounce_counter.saturating_sub(1);
-            } else {
-                //Already untriggered
-            }
-        }
-
-        reading = new_reading;
-
-        if IS_HOMED && loop_count == target_steps {
-            delay.delay_ms(2000);
+            delay.delay_ms(STEP_DELAY_TARGET_MS);
 
             target_idx = (target_idx + 1) % TARGETS.len();
             target_flap = TARGETS[target_idx];
-
-            target_steps = HOME_OFFSET + (target_flap * STEPS_PER_FLAP);
         }
 
         // info!("ADC: {}", reading);

@@ -75,9 +75,10 @@ pub enum BitState {
     SETTLED,
 }
 
+#[derive(Clone, Copy)]
 pub struct SensorCalibration {
-    trigger_value: u32,
-    untrigger_value: u32,
+    pub trigger_value: u32,
+    pub untrigger_value: u32,
 }
 
 
