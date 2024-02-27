@@ -147,7 +147,6 @@ impl SplitFlapBitState {
 
                 if self.bit_state == BitState::UNINITIALIZED {
                     //First homing of the bit.  Set us up to seek to the home position.
-                    self.bit_state = BitState::SEEKING;
                     self.target_steps = self.offset_steps_to_first_position;
                 }
             }
@@ -160,8 +159,11 @@ impl SplitFlapBitState {
         let needs_step = !(self.steps_since_home == self.target_steps);
 
         if needs_step {
+            self.bit_state = BitState::SEEKING;
             //Assume the step will be taken
             self.steps_since_home.inc();
+        } else {
+            self.bit_state = BitState::SETTLED;
         }
 
         needs_step
@@ -258,5 +260,70 @@ mod test {
         let process = result.process(sensor_value);
         assert!(!process, "Target reached, process returned true");        
 
+    }
+
+    #[test]
+    fn bit_becomes_settled_after_offset_reached() {
+        let calibration = super::SensorCalibration {
+            trigger_value: 2000,
+            untrigger_value: 1800,
+        };
+        let mut result = super::SplitFlapBitState::new(calibration, 58, 3);
+
+        let sensor_value: u32 = 2100;
+
+        let process = result.process(sensor_value);
+        let process = result.process(sensor_value);
+        let process = result.process(sensor_value);
+
+        let process = result.process(sensor_value);
+        assert!(result.bit_state == BitState::SETTLED, "Target reached, bit state not settled");        
+
+    }
+
+    #[test]
+    fn after_homing_setting_character_changes_target_steps() {
+        let calibration = super::SensorCalibration {
+            trigger_value: 2000,
+            untrigger_value: 1800,
+        };
+        let mut result = super::SplitFlapBitState::new(calibration, 58, 3);
+
+        let sensor_value: u32 = 2100;
+        
+        let process = result.process(sensor_value);
+        let process = result.process(sensor_value);
+        let process = result.process(sensor_value);
+
+        let process = result.process(sensor_value);
+
+        result.set_target_character('A' as u8);
+
+        assert_eq!(result.target_steps.homed_steps, 3 + 58);
+    }
+
+    #[test]
+    fn process_after_homing_setting_character_becomes_seeking() {
+        let calibration = super::SensorCalibration {
+            trigger_value: 2000,
+            untrigger_value: 1800,
+        };
+        let mut result = super::SplitFlapBitState::new(calibration, 58, 3);
+
+        let sensor_value: u32 = 2100;
+        
+        let process = result.process(sensor_value);
+
+        let sensor_value: u32 = 100;
+        let process = result.process(sensor_value);
+        let process = result.process(sensor_value);
+
+        let process = result.process(sensor_value);
+
+        result.set_target_character('A' as u8);
+
+        let process = result.process(sensor_value);
+
+        assert!(process, "Bit is not seeking for target character");
     }
 }
