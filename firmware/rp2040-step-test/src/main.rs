@@ -135,7 +135,6 @@ fn main() -> ! {
     const HOME_OFFSET: u32 = STEPS_PER_FLAP * 5;
 
     let mut target_idx = 0;
-    let mut target_flap = TARGETS[target_idx];
 
     let sensor_calibration = SensorCalibration {
         trigger_value: 2200,
@@ -150,12 +149,6 @@ fn main() -> ! {
     ];
 
     loop {
-        // delay.delay_us(delay_us);
-        step.set_high().unwrap();
-
-        delay.delay_us(STEP_DELAY_US);
-        step.set_low().unwrap();
-
         new_reading = adc.read(&mut hall_sensor_pin).unwrap();
 
         if BITS[0].process(new_reading as u32) {
@@ -169,8 +162,18 @@ fn main() -> ! {
             delay.delay_ms(STEP_DELAY_TARGET_MS);
 
             target_idx = (target_idx + 1) % TARGETS.len();
-            target_flap = TARGETS[target_idx];
+            let target_character = TARGETS[target_idx];
+
+            BITS[0].set_target_character(target_character as u8);
+
+            info!("New target: {}", target_character);
         }
+
+        delay.delay_us(STEP_DELAY_US);
+        step.set_high().unwrap();
+
+        delay.delay_us(STEP_DELAY_US);
+        step.set_low().unwrap();
 
         // info!("ADC: {}", reading);
 
