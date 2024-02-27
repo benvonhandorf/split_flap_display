@@ -42,6 +42,8 @@ use usbd_serial::SerialPort;
 use core::fmt::{Error, Write};
 use heapless::String;
 
+const TARGETS: [u32; 15] = [2, 22, 8, 0, 1, 12, 12, 20, 18, 1, 9, 12, 19, 0, 0];
+
 #[entry]
 fn main() -> ! {
     // info!("Program start");
@@ -124,12 +126,22 @@ fn main() -> ! {
     s3en.set_high().unwrap();
     s4en.set_low().unwrap();
 
+    const STEPS_PER_FLAP: u32 = 58;
+
+    const HOME_OFFSET: u32 = STEPS_PER_FLAP * 5;
+
+    let mut target_idx = 0;
+    let mut target_flap = TARGETS[target_idx];
+
+    let mut target_steps = HOME_OFFSET + (target_flap * STEPS_PER_FLAP);
+
     let mut text: String<64> = String::new();
+    let mut IS_HOMED = false;
 
     loop {
         loop_count = loop_count.saturating_add(1);
 
-        let delay_us = 800;
+        let delay_us = 900;
 
         led_pin.toggle().unwrap();
 
@@ -145,21 +157,22 @@ fn main() -> ! {
             if !triggered && debounce_counter == 0 {
                 triggered = true;
                 debounce_counter = 10;
+                IS_HOMED = true;
 
                 info!("Threshold {} loop_count: {}", new_reading, loop_count);
 
                 text.clear();
 
-                let result = writeln!(&mut text, "{}", loop_count);
+                let result = write!(&mut text, "{}\r\n", loop_count);
 
                 if result.is_err() {
-                    info!("writln failed");
+                    info!("writeln failed");
                 }
                 let _ = serial.write(text.as_bytes());
 
                 loop_count = 0;
 
-                delay.delay_ms(1000);
+                // delay.delay_ms(500);
             } else if !triggered {
                 debounce_counter = debounce_counter.saturating_sub(1);
             } else {
@@ -184,6 +197,15 @@ fn main() -> ! {
 
         reading = new_reading;
 
+        if IS_HOMED && loop_count == target_steps {
+            delay.delay_ms(2000);
+
+            target_idx = (target_idx + 1) % TARGETS.len();
+            target_flap = TARGETS[target_idx];
+
+            target_steps = HOME_OFFSET + (target_flap * STEPS_PER_FLAP);
+        }
+
         // info!("ADC: {}", reading);
 
         // let _ = serial.write(b"Loop\r\n");
@@ -204,17 +226,17 @@ fn main() -> ! {
                     buf.iter_mut().take(count).for_each(|b| {
                         b.make_ascii_uppercase();
                     });
-                    // Send back to the host
-                    let mut wr_ptr = &buf[..count];
-                    while !wr_ptr.is_empty() {
-                        match serial.write(wr_ptr) {
-                            Ok(len) => wr_ptr = &wr_ptr[len..],
-                            // On error, just drop unwritten data.
-                            // One possible error is Err(WouldBlock), meaning the USB
-                            // write buffer is full.
-                            Err(_) => break,
-                        };
-                    }
+                    // // Send back to the host
+                    // let mut wr_ptr = &buf[..count];
+                    // while !wr_ptr.is_empty() {
+                    //     match serial.write(wr_ptr) {
+                    //         Ok(len) => wr_ptr = &wr_ptr[len..],
+                    //         // On error, just drop unwritten data.
+                    //         // One possible error is Err(WouldBlock), meaning the USB
+                    //         // write buffer is full.
+                    //         Err(_) => break,
+                    //     };
+                    // }
                 }
             }
         }
