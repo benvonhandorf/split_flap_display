@@ -48,8 +48,12 @@ use heapless::String;
 use heapless::Vec;
 use split_flap_device::split_flap_bit_state::{SensorCalibration, SplitFlapBitState};
 
-const TARGETS: [char; 15] = [
-    'B', 'V', 'H', ' ', 'A', 'L', 'L', 'T', 'R', 'A', 'I', 'L', 'S', ' ', ' ',
+const TARGETS: [[char; 4]; 5] = [
+    ['B', 'V', 'H', ' '],
+    ['A', 'L', 'L', 'T'],
+    ['R', 'A', 'I', 'L'],
+    ['S', ' ', ' ', ' '],
+    [0x01, 0x02, 0x03, 0x04],
 ];
 
 #[entry]
@@ -109,7 +113,10 @@ fn main() -> ! {
     let mut adc = Adc::new(peripherals.ADC, &mut peripherals.RESETS);
 
     // Configure one of the pins as an ADC input
-    let mut hall_sensor_pin = AdcPin::new(pins.gpio27.into_floating_input());
+    let mut sensor_pin_0 = AdcPin::new(pins.gpio27.into_floating_input());
+    let mut sensor_pin_1 = AdcPin::new(pins.gpio27.into_floating_input());
+    let mut sensor_pin_2 = AdcPin::new(pins.gpio27.into_floating_input());
+    let mut sensor_pin_3 = AdcPin::new(pins.gpio27.into_floating_input());
 
     let mut led_pin = pins.led.into_push_pull_output();
 
@@ -120,7 +127,10 @@ fn main() -> ! {
     let mut s2en = pins.gpio21.into_push_pull_output();
     let mut s3en = pins.gpio22.into_push_pull_output();
 
-    let mut new_reading: u64 = 0;
+    let mut sensor_0: u64 = 0;
+    let mut sensor_1: u64 = 0;
+    let mut sensor_2: u64 = 0;
+    let mut sensor_3: u64 = 0;
 
     s0en.set_low().unwrap();
     s1en.set_low().unwrap();
@@ -149,24 +159,54 @@ fn main() -> ! {
     ];
 
     loop {
-        new_reading = adc.read(&mut hall_sensor_pin).unwrap();
+        sensor_0 = adc.read(&mut sensor_pin_0).unwrap();
+        sensor_1 = adc.read(&mut sensor_pin_1).unwrap();
+        sensor_2 = adc.read(&mut sensor_pin_2).unwrap();
+        sensor_3 = adc.read(&mut sensor_pin_3).unwrap();
 
-        if BITS[0].process(new_reading as u32) {
+        let s0_process = BITS[0].process(sensor_0 as u32);
+        let s1_process = BITS[1].process(sensor_1 as u32);
+        let s2_process = BITS[1].process(sensor_2 as u32);
+        let s3_process = BITS[1].process(sensor_3 as u32);
+
+        if s0_process {
             s0en.set_high().unwrap();
         } else {
             s0en.set_low().unwrap();
+        }
 
+        if s1_process {
+            s1en.set_high().unwrap();
+        } else {
+            s1en.set_low().unwrap();
+        }
+
+        if s2_process {
+            s2en.set_high().unwrap();
+        } else {
+            s2en.set_low().unwrap();
+        }
+
+        if s3_process {
+            s3en.set_high().unwrap();
+        } else {
+            s3en.set_low().unwrap();
+        }
+
+        if !s0_process && !s1_process && !s2_process && !s3_process {
             //If we've stopped stepping, we can delay briefly and then advance to the next character
             //to be displayed
 
             delay.delay_ms(STEP_DELAY_TARGET_MS);
 
             target_idx = (target_idx + 1) % TARGETS.len();
-            let target_character = TARGETS[target_idx];
+            let targets = TARGETS[target_idx];
 
-            BITS[0].set_target_character(target_character as u8);
+            for idx in 0..4 {
+                BITS[idx].set_target_character(targets[idx] as u8);
+            }
 
-            info!("New target: {}", target_character);
+            info!("New targets: {}", targets);
         }
 
         delay.delay_us(STEP_DELAY_US);

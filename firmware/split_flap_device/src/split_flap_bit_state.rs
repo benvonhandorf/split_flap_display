@@ -1,6 +1,6 @@
 // use std::convert::From;
 use core::cmp::PartialEq;
-use core::ops::{self, Add, Mul};
+use core::ops::{self, Add, Mul, Rem};
 
 const CHARACTER_SET: [u8; 55] = [
     b' ', b'A', b'B', b'C', b'D', b'E', b'F', b'G', b'H', b'I', b'J', b'K', b'L', b'M', b'N', b'O',
@@ -23,6 +23,13 @@ impl Mul<u32> for Steps {
     }
 }
 
+impl Mul<usize> for Steps {
+    type Output = Self;
+    fn mul(self, rhs: usize) -> Self::Output {
+        self.mul(rhs as u32)
+    }
+}
+
 #[derive(Clone, Copy)]
 struct HomedSteps {
     homed_steps: u32,
@@ -36,6 +43,16 @@ impl Add<Steps> for HomedSteps {
         }
     }
 }
+
+impl Rem<Steps> for HomedSteps {
+    type Output = Self;
+    fn rem(self, rhs: Steps) -> Self::Output {
+        HomedSteps {
+            homed_steps: self.homed_steps % rhs.steps,
+        }
+    }
+}
+
 
 impl PartialEq<HomedSteps> for HomedSteps {
     fn eq(&self, other: &HomedSteps) -> bool {
@@ -133,7 +150,7 @@ impl SplitFlapBitState {
     fn lookup_target_character_steps(&self, target_character_code: u8) -> HomedSteps {
         let target_position = self.lookup_target_character_position(target_character_code);
 
-        self.offset_steps_to_first_position + (self.steps_per_flap * target_position)
+       (self.offset_steps_to_first_position + (self.steps_per_flap * target_position)) % (self.steps_per_flap * CHARACTER_SET.len())
     }
 
     pub fn set_target_character(&mut self, target_character: u8) {
@@ -368,6 +385,28 @@ mod test {
         assert_eq!(
             result.target_steps.homed_steps,
             (8 * 58) + 3,
+            "Target steps is not as expected"
+        );
+    }
+
+    #[test]
+    fn after_setting_character_between_home_and_end_of_drum_target_steps_is_less_than_offset() {
+        let calibration = super::SensorCalibration {
+            trigger_value: 2000,
+            untrigger_value: 1800,
+        };
+        let mut result = super::SplitFlapBitState::new(calibration, 58, 6 * 58 );
+
+        let sensor_value: u32 = 2100;
+
+        //Leads to home position found
+        let process = result.process(sensor_value);
+
+        result.set_target_character(0x0A as u8);
+
+        assert_eq!(
+            result.target_steps.homed_steps,
+            (4 * 58),
             "Target steps is not as expected"
         );
     }
